@@ -1,17 +1,17 @@
-/// Shannon calculates the message entropy.
-/// In information theory, the entropy of a random variable is the average level of 
-/// "information", "surprise", or "uncertainty" inherent to the variable's possible outcomes. 
-/// Given a discrete random variable 𝑋 which takes values in the set 𝑋 and is distributed according to 
-/// p: X -> [0, 1], the entropy is H(X) := - Sum(p(x)log p()x).
-
 use std::collections::HashMap;
 use std::io::{Error, ErrorKind, Write};
 use std::str::from_utf8;
 
 const CHUNK_SIZE: usize = 64;
 
-/// Preprocessor perform preprocessing of the information in given buffer.
-///  
+/// Shannon perform preprocessing of the information in given buffer.
+/// 
+/// Shannon calculates the message entropy.
+/// In information theory, the entropy of a random variable is the average level of 
+/// "information", "surprise", or "uncertainty" inherent to the variable's possible outcomes. 
+/// Given a discrete random variable 𝑋 which takes values in the set 𝑋 and is distributed according to 
+/// p: X -> [0, 1], the entropy is H(X) := - Sum(p(x)log p()x).
+/// 
 pub struct Shannon {
     buf: Vec<u8>,
     entropy: u64,

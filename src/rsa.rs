@@ -1,18 +1,3 @@
-/// RSA PickLock algorithm is cracking RSA private key when p and q are not to far apart.
-/// Crack Weak Private is able to crack secured RSA keys, where p and q are picked to be close numbers,
-/// Based on https://en.wikipedia.org/wiki/Fermat%27s_factorization_method
-/// With common RSA key sizes (2048 bit) in tests,
-/// the Fermat algorithm with 100 rounds reliably factors numbers where p and q differ up to 2^517.
-/// In other words, it can be said that primes that only differ within the lower 64 bytes
-/// (or around half their size) will be vulnerable.
-/// If this tool cracks your key, you are using insecure RSA algorithm.
-/// e - public exponent
-/// n - modulus
-/// d - private exponent
-/// e and n are bytes representation of an integer in big endian order.
-/// Returns private key as bytes representation of an integer in big endian order or error otherwise.
-/// Will not go further then 1000 iterations.
-
 use openssl::{bn::{BigNum, BigNumRef}, error, rsa::Rsa};
 use std::{collections::HashSet, io::{Error, ErrorKind, Result}};
 use num_bigint::{BigInt, BigUint, Sign};
@@ -93,6 +78,21 @@ impl PickLock {
     /// to generate Private Keys based on Public Key.
     /// If it succeeds then the numeric value is returned, 
     /// and this value may be used to create PEM certificate.
+    ///     
+    /// RSA PickLock algorithm is cracking RSA private key when p and q are not to far apart.
+    /// Crack Weak Private is able to crack secured RSA keys, where p and q are picked to be close numbers,
+    /// Based on https://en.wikipedia.org/wiki/Fermat%27s_factorization_method
+    /// With common RSA key sizes (2048 bit) in tests,
+    /// the Fermat algorithm with 100 rounds reliably factors numbers where p and q differ up to 2^517.
+    /// In other words, it can be said that primes that only differ within the lower 64 bytes
+    /// (or around half their size) will be vulnerable.
+    /// If this tool cracks your key, you are using insecure RSA algorithm.
+    /// e - public exponent
+    /// n - modulus
+    /// d - private exponent
+    /// e and n are bytes representation of an integer in big endian order.
+    /// Returns private key as bytes representation of an integer in big endian order or error otherwise.
+    /// Will not go further then 1000 iterations.
     /// 
     #[inline(always)]
     pub fn try_lock_pick_weak_private(&self) -> Result<BigInt> {
