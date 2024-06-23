@@ -31,25 +31,17 @@ Is cracking RSA when p and q are far apart.
 Similar in terms of factorization to weak algorithm, but works on the principal that RSA p and q
 are chosen according to the specification where:
  -> p * q = n,
- -> p and q are primes that differs more in more than first 2^517 - last 64 bytes.
+ -> p and q are primes that differs in more than first 2^517 - last 64 bytes.
  -> p and q are fairly equal in bits size and can vary +/- 1 bit,
  -> bits size of p + bits size of q are equal to n,
 
 [ 🧮 ] Bilbo offers entropy calculation.
 
-The Shannon entropy is a statistical quantifier extensively used for the characterization of complex processes. 
-It is capable of detecting nonlinearity aspects in model series, 
-contributing to a more reliable explanation regarding the nonlinear dynamics of different points of analysis,
-which in turn enhances the comprehension of the nature of complex systems characterized by complexity and nonequilibrium.
-In addition to complexity and nonequilibrium, most, not all, complex systems also have the characteristic of being marked 
-by heterogeneous distributions of links.
-The concept of entropy was used by Shannon in information theory for the data communication of computer sciences
-and is known as Shannon entropy.
-Based on this concept, the mean value of the shortest possibilities required to code a message is the division
-of the symbol logarithm in the alphabet by the entropy.
-Entropy refers to a measurement of vagueness and randomness in a system
-. If we assume that all the available data belong to one class, 
-it will not be hard to predict the class of a new data.
+The Shannon entropy is a statistical quantifier extensively used for the characterization of complex processes. It is capable of detecting nonlinearity aspects in model series, contributing to a more reliable explanation regarding the nonlinear dynamics of different points of analysis, which in turn enhances the comprehension of the nature of complex systems characterized by complexity and nonequilibrium.
+In addition to complexity and nonequilibrium, most, not all, complex systems also have the characteristic of being marked by heterogeneous distributions of links.
+The concept of entropy was used by Shannon in information theory for the data communication of computer sciences and is known as Shannon entropy.
+Based on this concept, the mean value of the shortest possibilities required to code a message is the division of the symbol logarithm in the alphabet by the entropy.
+Entropy refers to a measurement of vagueness and randomness in a system. If we assume that all the available data belong to one class, it will not be hard to predict the class of a new data.
 ";
 
 fn main() {
