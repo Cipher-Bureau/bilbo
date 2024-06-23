@@ -1,0 +1,23 @@
+[package]
+name = "bilbo"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.5.7", features = ["cargo"] }
+num-bigint = "0.4.5"
+num-prime = "0.4.4"
+openssl = "0.10.64"
+pem = "3.0.4"
+rand = "0.8.5"
+
+[dev-dependencies]
+criterion = "0.5.1"
+
+[[bench]]
+name = "benchmarks"
+harness = false
+
+[profile.test]
+# Enable optimizations for tests
+opt-level = 3
