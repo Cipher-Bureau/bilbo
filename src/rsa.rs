@@ -149,6 +149,8 @@ impl PickLock {
     /// it generates a lot of primes, it is still a matter of luck
     /// to find the matching pair.
     /// 
+    /// TODO: Make more research and tests to find out how much information can we get to better guess primes.
+    /// 
     #[inline(always)]
     pub fn try_lock_pick_strong_private(&self, report: bool) -> Result<BigInt> {
         let p_size = self.n.to_bytes_be().1.len() as u32 / 2;
