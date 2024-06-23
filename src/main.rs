@@ -35,7 +35,7 @@ are chosen according to the specification where:
  -> p and q are fairly equal in bits size and can vary +/- 1 bit,
  -> bits size of p + bits size of q are equal to n,
 
-[ 🧮 ] Bilbo offers entropy calculation a file.
+[ 🧮 ] Bilbo offers entropy calculation.
 
 The Shannon entropy is a statistical quantifier extensively used for the characterization of complex processes. 
 It is capable of detecting nonlinearity aspects in model series, 
