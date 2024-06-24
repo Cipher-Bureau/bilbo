@@ -48,7 +48,7 @@ fn main() {
     let cmd = Command::new("bilbo")
         .bin_name("bilbo")
         .subcommand_required(true)
-        .about("🧝 Bilbo is here to help you on your journey to unlock precious items.")
+        .about("🧝 Bilbo is a simple CLI cyber security tool. Scans files to discover hidden information.")
         .subcommand(
             command!("picklock")
             .about("Attempts to pick lock the rsa key.")

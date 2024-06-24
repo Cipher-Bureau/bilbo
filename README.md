@@ -51,7 +51,7 @@ cargo build --release --target <cpu-required_architecture>
  **This is a fun project, treat it lightly.**
 
 ```sh
-🧝 Bilbo is here to help you on your journey to unlock precious items.
+🧝 Bilbo is a simple CLI cyber security tool. Scans files to discover hidden information.
 
 Usage: bilbo <COMMAND>
 
