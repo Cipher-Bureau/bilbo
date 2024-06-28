@@ -33,7 +33,7 @@ fn benchmark_lock_pick_weak_private_to_crack_large_weak_rsa(c: &mut Criterion) {
     });
 }
 
-fn benchmark_lock_pick_weak_private_to_not_be_able_to_crack_strong_large_rsa(c: &mut Criterion) {
+fn benchmark_lock_pick_weak_private_to_not_be_able_to_crack_strong_small_rsa(c: &mut Criterion) {
     c.bench_function("benchmark_lock_pick_weak_private_to_not_be_able_to_crack_strong_large_rsa", |b| { 
         
         const PUBLIC_KEY_SAMPLE: &'static str = "-----BEGIN PUBLIC KEY-----
@@ -56,6 +56,27 @@ kTirAEQ+F3NKfNEdR9J/+Rq+2ViT3wnamtuBG+10SKuKjr9FKhh/T0sCAwEAAQ==
     });
 }
 
+fn benchmark_lock_pick_strong_private_to_crack_strong_small_rsa(c: &mut Criterion) {
+    c.bench_function("benchmark_lock_pick_strong_private_to_crack_strong_small_rsa", |b| { 
+        
+        const PUBLIC_KEY_SAMPLE: &'static str = "-----BEGIN PUBLIC KEY-----
+MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAMp2Z+WFY2ygdgPMnWpJNxqtuweA1nix
+kTirAEQ+F3NKfNEdR9J/+Rq+2ViT3wnamtuBG+10SKuKjr9FKhh/T0sCAwEAAQ==
+-----END PUBLIC KEY-----
+        ";
+
+        let Ok(mut pl) = PickLock::from_pem(&PUBLIC_KEY_SAMPLE) else {
+            assert!(false);
+            return;
+        };
+        pl.alter_max_iter(100);
+
+        b.iter(|| {
+            let _ = pl.try_lock_pick_strong_private(false);
+        });
+    });
+}
+
 fn benchmark_entropy_calculation(c: &mut Criterion) {
     c.bench_function("benchmark_entropy_calculation", |b| {
         let info_buffer = "+/OPANMQZ1AMsXrp/qP0aXbYLyeI6KaKDNEFLvq3";
@@ -71,7 +92,8 @@ fn benchmark_entropy_calculation(c: &mut Criterion) {
 criterion_group!(
     benches,
     benchmark_lock_pick_weak_private_to_crack_large_weak_rsa,
-    benchmark_lock_pick_weak_private_to_not_be_able_to_crack_strong_large_rsa,
+    benchmark_lock_pick_weak_private_to_not_be_able_to_crack_strong_small_rsa,
+    benchmark_lock_pick_strong_private_to_crack_strong_small_rsa,
     benchmark_entropy_calculation,
 );
 criterion_main!(benches);
