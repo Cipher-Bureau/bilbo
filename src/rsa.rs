@@ -1,12 +1,14 @@
 use openssl::{bn::{BigNum, BigNumRef}, error, rsa::Rsa};
-use std::{collections::HashSet, io::{Error, ErrorKind, Result}};
+use std::{collections::HashSet, io::{Error, ErrorKind, Result}, thread::spawn};
 use num_bigint::{BigInt, BigUint, Sign};
+use crossbeam::channel::{Sender, Receiver, unbounded, select};
 use pem::{Pem, encode};
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use num_prime::nt_funcs::is_prime;
 
 const MAX_ITERATIONS: usize = 1000;
 const BITS_IN_BYTE: u32 = 8;
+const PRIME_CREATE_PROCESSES: u8 = 4;
 
 /// Describes the Key type. 
 pub enum KeyType {
@@ -49,7 +51,7 @@ impl PickLock {
     pub fn from_pem(rsa_pem: &str) -> Result<Self> {
         let public_rsa = Rsa::public_key_from_pem(rsa_pem.as_bytes())
             .or_else(|e: error::ErrorStack| Err(Error::new(ErrorKind::InvalidData, e.to_string())))?;
-            
+        
         Ok(Self{
             e: BigInt::from_bytes_be(Sign::Plus, &public_rsa.e().to_vec()),
             n: BigInt::from_bytes_be(Sign::Plus, &public_rsa.n().to_vec()),
@@ -154,69 +156,114 @@ impl PickLock {
     #[inline(always)]
     pub fn try_lock_pick_strong_private(&self, report: bool) -> Result<BigInt> {
         let p_size = self.n.to_bytes_be().1.len() as u32 / 2;
+        let mut stops = 0;
+        let (tx, rx) = unbounded();
+        let (stop_from_checker_tx, stop_from_checker_rx) = unbounded::<()>();
+        let (stop_from_generator_tx, stop_from_generator_rx) = unbounded::<()>();
+        for _ in 0..PRIME_CREATE_PROCESSES {
+            for diff in 0..=2 { // Since n = p*q, the size of n will be more or less the sum of the sizes of p and q with +/- 1 bit
+                let stop_rx = stop_from_checker_rx.clone();
+                let tx = tx.clone();
+                let max_iter = self.max_iter / (PRIME_CREATE_PROCESSES * 3) as usize;
+                let stop_from_generator_tx = stop_from_generator_tx.clone();
+                stops+=1;
+                spawn(move || {
+                    for _ in 0..max_iter {
+                        select!{
+                            recv(stop_rx) -> _  => {
+                                break;
+                            },
+                            default => {
+                                if let Ok(prime) = generate_safe_prime_bit_size(((p_size * BITS_IN_BYTE) as i32 - diff) as u32) {
+                                    let _ = tx.send(prime);
+                                }
+                            },
+                        }
+                    }
+                    let _ = stop_from_generator_tx.send(());
+                });
+            }
+        }
+
+        self.calculate_pairs(rx, stop_from_generator_rx, stop_from_checker_tx, stops, report)
+    }
+
+    fn calculate_pairs(&self, rx: Receiver<BigNum>, stop_from_generator_rx: Receiver<()>, stop_from_checker_tx: Sender<()>, stops: u32, report: bool) -> Result<BigInt> {
+        
         let mut p = BigInt::new(Sign::Plus, vec![0]);
         let mut q = BigInt::new(Sign::Plus, vec![0]);
-        let mut sum_of_checked_primes = 0;
         let mut passed_first = false;
+        let mut next = 0;
+        let mut checked_primes: HashSet<BigInt> = HashSet::with_capacity(self.max_iter);
+        let mut stop_counter = 0;
+        
+        'checker: loop {
+            select! {
+                recv(stop_from_generator_rx) -> _ => {
+                    stop_counter+=1;
+                    if stop_counter == stops {
+                        break 'checker;
+                    }
+                },
+                recv(rx) -> prime => {
+                    let Ok(prime) = prime else {continue 'checker};
+                    if report && next % 25 == 0 && passed_first {
+                        println!("Checked {} primes.", checked_primes.len());
+                    }
+                    next +=1;
+                    passed_first = true;
 
-        for diff in 0..=2 { // Since n = p*q, the size of n will be more or less the sum of the sizes of p and q with +/- 1 bit
-            let mut checked_primes: HashSet<BigInt> = HashSet::with_capacity(self.max_iter);
-            let diff: i32 = diff as i32 - 1;
-            'next_prime_lookup: for n in 0..self.max_iter {
-                if report && n % 25 == 0 && passed_first {
-                    println!("Checked {} primes.", sum_of_checked_primes + checked_primes.len());
-                }
-                passed_first = true;
+                    p = BigInt::from_bytes_be(Sign::Plus, &prime.to_vec());
 
-                p = BigInt::from_bytes_be(
-                    Sign::Plus, 
-                    &generate_safe_prime_bit_size(((p_size * BITS_IN_BYTE) as i32 - diff) as u32)?.to_vec(),
-                );
-                if !checked_primes.insert(p.clone()) {
-                    continue 'next_prime_lookup;
-                }
+                    if !checked_primes.insert(p.clone()) {
+                        continue 'checker;
+                    }
 
-                q = &self.n / &p;
+                    q = &self.n / &p;
  
-                if &p * &q != self.n {
-                    continue 'next_prime_lookup;
-                }
-                let Some(q_uint) = q.to_biguint() else {
-                    return Err(Error::new(ErrorKind::InvalidData, "cannot transform BigInt to BigUint"));
-                };
-                if is_prime::<BigUint>(&q_uint, None).probably() {
-                    break;
-                }
-            }
-            sum_of_checked_primes += checked_primes.len();
+                    if &p * &q != self.n {
+                        continue 'checker;
+                    }
+                    let Some(q_uint) = q.to_biguint() else {
+                        return Err(Error::new(ErrorKind::InvalidData, "cannot transform BigInt to BigUint"));
+                    };
+                    if is_prime::<BigUint>(&q_uint, None).probably() {
+                        break 'checker;
+                    }
+                },
         }
-        
-        if report {
-            println!("Checked {} primes.", sum_of_checked_primes);
-        }
-        
-        if &p * &q != self.n { // Final test in case 'next_prime_lookup loop is exhausted without finding p and q.
-            return Err(
-                Error::new(
-                    ErrorKind::Other, 
-                    format!("cannot crack the private exponent of the given n {} and e {}", 
-                        self.n, 
-                        self.e
-                    )
-                )
-            );
-        }
+    }
 
-        let phi = (&p - BigInt::new(Sign::Plus, vec![1])) * (&q - BigInt::new(Sign::Plus, vec![1]));
-        
+    for _ in 0..stops {
+        let _ = stop_from_checker_tx.send(());
+    }
 
-        match self.e.modinv(&phi) {
-            Some(r) => Ok(r),
-            None => Err(Error::new(
+    if report {
+        println!("Checked {} primes.", checked_primes.len());
+    }
+
+    if &p * &q != self.n { // Final test in case 'next_prime_lookup loop is exhausted without finding p and q.
+        return Err(
+            Error::new(
                 ErrorKind::Other, 
-                format!("cannot calculate private exponent for phi {} and e {}", phi, self.e))
-            ),
-        }
+                format!("cannot crack the private exponent of the given n {} and e {}", 
+                    self.n, 
+                    self.e
+                )
+            )
+        );
+    }
+
+    let phi = (&p - BigInt::new(Sign::Plus, vec![1])) * (&q - BigInt::new(Sign::Plus, vec![1]));
+
+
+    match self.e.modinv(&phi) {
+        Some(r) => Ok(r),
+        None => Err(Error::new(
+            ErrorKind::Other, 
+            format!("cannot calculate private exponent for phi {} and e {}", phi, self.e))
+        ),  
+    }
     }
 } 
 
