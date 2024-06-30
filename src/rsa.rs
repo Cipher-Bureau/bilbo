@@ -71,7 +71,10 @@ impl PickLock {
     /// Default number of iterations is set to 1000, which is way above expected possibility to crack the key.
     ///   
     #[inline(always)]
-    pub fn alter_max_iter(&mut self, iter: usize) {
+    pub fn alter_max_iter(&mut self, mut iter: usize) {
+        if iter == 0 {
+            iter = 0;
+        }
         self.max_iter = iter;
     } 
 
@@ -158,17 +161,14 @@ impl PickLock {
         let p_size = self.n.to_bytes_be().1.len() as u32 / 2;
         let mut stops = 0;
         let (tx, rx) = unbounded();
-        let (stop_from_checker_tx, stop_from_checker_rx) = unbounded::<()>();
-        let (stop_from_generator_tx, stop_from_generator_rx) = unbounded::<()>();
+        let (stop_tx, stop_rx) = unbounded::<()>();
         for _ in 0..PRIME_CREATE_PROCESSES {
             for diff in 0..=2 { // Since n = p*q, the size of n will be more or less the sum of the sizes of p and q with +/- 1 bit
-                let stop_rx = stop_from_checker_rx.clone();
+                let stop_rx = stop_rx.clone();
                 let tx = tx.clone();
-                let max_iter = self.max_iter / (PRIME_CREATE_PROCESSES * 3) as usize;
-                let stop_from_generator_tx = stop_from_generator_tx.clone();
                 stops+=1;
                 spawn(move || {
-                    for _ in 0..max_iter {
+                    loop {
                         select!{
                             recv(stop_rx) -> _  => {
                                 break;
@@ -180,38 +180,32 @@ impl PickLock {
                             },
                         }
                     }
-                    let _ = stop_from_generator_tx.send(());
                 });
             }
         }
 
-        self.calculate_pairs(rx, stop_from_generator_rx, stop_from_checker_tx, stops, report)
+        self.validate_received_prime_pairs(rx, stop_tx, stops, report)
     }
 
-    fn calculate_pairs(&self, rx: Receiver<BigNum>, stop_from_generator_rx: Receiver<()>, stop_from_checker_tx: Sender<()>, stops: u32, report: bool) -> Result<BigInt> {
+    #[inline(always)]
+    fn validate_received_prime_pairs(&self, rx: Receiver<BigNum>, stop_tx: Sender<()>, stops: u32, report: bool) -> Result<BigInt> {
         
         let mut p = BigInt::new(Sign::Plus, vec![0]);
         let mut q = BigInt::new(Sign::Plus, vec![0]);
-        let mut passed_first = false;
         let mut next = 0;
         let mut checked_primes: HashSet<BigInt> = HashSet::with_capacity(self.max_iter);
-        let mut stop_counter = 0;
         
         'checker: loop {
             select! {
-                recv(stop_from_generator_rx) -> _ => {
-                    stop_counter+=1;
-                    if stop_counter == stops {
-                        break 'checker;
-                    }
-                },
                 recv(rx) -> prime => {
                     let Ok(prime) = prime else {continue 'checker};
-                    if report && next % 25 == 0 && passed_first {
+                    if next == self.max_iter {
+                        break 'checker;
+                    }
+                    if report && next % 25 == 0 && next != 0 {
                         println!("Checked {} primes.", checked_primes.len());
                     }
-                    next +=1;
-                    passed_first = true;
+                    next += 1;
 
                     p = BigInt::from_bytes_be(Sign::Plus, &prime.to_vec());
 
@@ -235,7 +229,7 @@ impl PickLock {
     }
 
     for _ in 0..stops {
-        let _ = stop_from_checker_tx.send(());
+        let _ = stop_tx.send(());
     }
 
     if report {

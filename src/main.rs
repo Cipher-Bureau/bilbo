@@ -56,8 +56,10 @@ fn main() {
                 arg!(--"file" <FILE> "Path to file in PEM format to be lock picked")
                     .value_parser(value_parser!(PathBuf)),
             ).arg(
-                arg!(--"strong" <ITERS>).value_parser(value_parser!(u32)),
-            )
+                arg!(--"strong" <ITERS> "Number of primes to iterate over. Primes are randomly generated").value_parser(value_parser!(u32)),
+            ).arg(
+                arg!(--"report" <LEVEL> "Level of reporting. 0 (default): Only results. 1: Important steps only. 2: Information about number of primes checked.").value_parser(value_parser!(u8)),
+            ),
         ).subcommand(
             command!("explain"). about("Explains used algorithms."),
         ).subcommand(
@@ -66,19 +68,21 @@ fn main() {
             .arg(
                 arg!(--"file" <FILE> "Path to file.")
                     .value_parser(value_parser!(PathBuf)),
+            ).arg(
+                arg!(--"report" <LEVEL> "Level of reporting. 0 (default): Only results. 1: Important steps only. 2: All foundings such as each line entropy.").value_parser(value_parser!(u8)),
             )
         );
     let matches = cmd.get_matches();
     match matches.subcommand() {
         Some(("picklock", matches)) =>  {
             match run_picklock(matches.get_one::<PathBuf>("file"), 
-            matches.get_one::<u32>("strong")) {
+            matches.get_one::<u32>("strong"), matches.get_one::<u8>("report")) {
                 Ok(s) => println!("🗝 Lock picked private PEM key:\n{s}\n"),
                 Err(e) => println!("🤷 Failure: {}", e.to_string()),
             }
         },
         Some(("entropy", matches)) => {
-            match run_entropy(matches.get_one::<PathBuf>("file")) {
+            match run_entropy(matches.get_one::<PathBuf>("file"), matches.get_one::<u8>("report")) {
                 Ok(s) => println!("📶 Entropy:\n{s}\n"),
                 Err(e) => println!("🤷 Failure: {}", e.to_string()),
             }
@@ -90,7 +94,8 @@ fn main() {
     };   
 }
 
-fn run_picklock(path: Option<&PathBuf>, strong_iters: Option<&u32>) -> Result<String> {
+fn run_picklock(path: Option<&PathBuf>, strong_iters: Option<&u32>, report_level: Option<&u8>) -> Result<String> {
+    let report_level = check_level(report_level)?;
     let Some(path) = path else { 
         return Err(Error::new(
             ErrorKind::InvalidInput, 
@@ -103,15 +108,19 @@ fn run_picklock(path: Option<&PathBuf>, strong_iters: Option<&u32>) -> Result<St
 
     let d = match strong_iters {
         None => {
-            println!("🔐 Starting lock picking the weak RSA private key.\n");
+            if report_level >= 1 {
+                println!("🔐 Starting lock picking the weak RSA private key.\n");
+            }
             pl.try_lock_pick_weak_private()?
         },
         Some(iter) => {
-            println!("🔐 Starting lock picking the strong RSA private key.\n");
+            if report_level >= 1 {
+                println!("🔐 Starting lock picking the strong RSA private key.\n");
+            }
             if *iter != 0 {
                 pl.alter_max_iter(*iter as usize);
             }
-            pl.try_lock_pick_strong_private(true)?
+            pl.try_lock_pick_strong_private(report_level == 2)?
         }
     };
     let pem_priv = to_pem(d, KeyType::Private)?; 
@@ -119,12 +128,15 @@ fn run_picklock(path: Option<&PathBuf>, strong_iters: Option<&u32>) -> Result<St
     Ok(pem_priv)
 }
 
-fn run_entropy(path: Option<&PathBuf>) -> Result<String> {
-    println!("🧮 Starting Shannon entropy calculation.\n");
+fn run_entropy(path: Option<&PathBuf>, report_level: Option<&u8>) -> Result<String> {
+    let report_level = check_level(report_level)?;
+    if report_level >= 1 {
+        println!("🧮 Starting Shannon entropy calculation.\n");
+    }
     let Some(path) = path else { 
         return Err(Error::new(
             ErrorKind::InvalidInput, 
-            "I received an empty file path... I don't know what to picklock, please be specific..."
+            "I received an empty file path... I don't know what file to calculate entropy for, please be specific..."
         ))
     };
 
@@ -138,10 +150,20 @@ fn run_entropy(path: Option<&PathBuf>) -> Result<String> {
         ent.write(line.as_bytes())?;
         ent.process();
         let e = ent.get_entropy();
-        result.push_str(&format!("Line {i} [ {e} ]\n"));
+        if report_level == 2 {
+            result.push_str(&format!("Line {i} [ {e} ]\n"));
+        }
         sum += e;
     }
     result.push_str(&format!("Total [ {sum} ]\n")); 
 
     Ok(result)
+}
+
+fn check_level(level: Option<&u8>) -> Result<u8> {
+    let level = *level.unwrap_or(&0);
+    match level {
+        0 | 1 | 2 => Ok(level),
+        _ => Err(Error::new(ErrorKind::InvalidData, format!("Expected level 0, 1 or 2, got {level}"))),
+    }
 }
