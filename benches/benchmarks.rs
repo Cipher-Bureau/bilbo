@@ -1,5 +1,4 @@
 use std::io::Write;
-
 use criterion::{criterion_group, criterion_main, Criterion};
 use bilbo::rsa::PickLock;
 use bilbo::entropy::Shannon;
@@ -69,7 +68,10 @@ kTirAEQ+F3NKfNEdR9J/+Rq+2ViT3wnamtuBG+10SKuKjr9FKhh/T0sCAwEAAQ==
             assert!(false);
             return;
         };
-        pl.alter_max_iter(100);
+        let Ok(_) = pl.alter_max_iter(100) else {
+            assert!(false);
+            return;
+        };
 
         b.iter(|| {
             let _ = pl.try_lock_pick_strong_private(false);
