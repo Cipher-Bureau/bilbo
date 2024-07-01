@@ -118,7 +118,7 @@ fn run_picklock(path: Option<&PathBuf>, strong_iters: Option<&u32>, report_level
                 println!("🔐 Starting lock picking the strong RSA private key.\n");
             }
             if *iter != 0 {
-                pl.alter_max_iter(*iter as usize);
+                pl.alter_max_iter(*iter as usize)?;
             }
             pl.try_lock_pick_strong_private(report_level == 2)?
         }
@@ -142,20 +142,33 @@ fn run_entropy(path: Option<&PathBuf>, report_level: Option<&u8>) -> Result<Stri
 
     let data = read_to_string(path)?;
 
-    let mut sum = 0;
     let mut result = String::new();
+    let mut total_entropy = entropy::Shannon::new();
+    let mut total_bts: usize = 0;
+
+    result.push_str(&format!(
+        "| {0: <6} | {1: <7} | {2: <6} | {3: <24} |\n",
+        "Line", "Entropy", "Bytes", "Starts with"
+    ));
 
     for (i, line) in data.lines().enumerate() {
         let mut ent = entropy::Shannon::new();
-        ent.write(line.as_bytes())?;
-        ent.process();
-        let e = ent.get_entropy();
+        let buf = line.as_bytes();
+
+        total_entropy.write(buf)?;
+        total_entropy.process();
+        let bts = buf.len();
+        total_bts += bts;
         if report_level == 2 {
-            result.push_str(&format!("Line {i} [ {e} ]\n"));
+            ent.write(buf)?;
+            ent.process();
+            let e = ent.get_entropy();
+            result.push_str(&format!("| {0: <6} | {1: <7} | {2: <6} | {3: <21}... |\n", i+1, e, bts, &line[..if line.len() < 21 { line.len() } else { 21 }]));
         }
-        sum += e;
     }
-    result.push_str(&format!("Total [ {sum} ]\n")); 
+
+    let total_entropy = total_entropy.get_entropy();
+    result.push_str(&format!("| {0: <6} | {1: <7} | {2: <6} | {3: <24} |\n", "TOTAL", total_entropy, total_bts, "")); 
 
     Ok(result)
 }

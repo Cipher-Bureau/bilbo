@@ -71,11 +71,21 @@ impl PickLock {
     /// Default number of iterations is set to 1000, which is way above expected possibility to crack the key.
     ///   
     #[inline(always)]
-    pub fn alter_max_iter(&mut self, mut iter: usize) {
+    pub fn alter_max_iter(&mut self, mut iter: usize) -> Result<()> {
+        if iter > 99999999999999 {
+            return Err(
+                Error::new(
+                    ErrorKind::InvalidInput, 
+                    format!("Max allowed iter is 99999999999999, got {}", iter),
+                ),
+            );
+        }
         if iter == 0 {
             iter = 0;
         }
         self.max_iter = iter;
+        
+        Ok(())
     } 
 
     /// Attempts to lock pick the weak private RSA key, 
@@ -194,6 +204,9 @@ impl PickLock {
         let mut q = BigInt::new(Sign::Plus, vec![0]);
         let mut next = 0;
         let mut checked_primes: HashSet<BigInt> = HashSet::with_capacity(self.max_iter);
+        if report {
+            println!("[ {0: <14} ]", "CHECKED PRIMES");
+        }
         
         'checker: loop {
             select! {
@@ -203,7 +216,7 @@ impl PickLock {
                         break 'checker;
                     }
                     if report && next % 25 == 0 && next != 0 {
-                        println!("Checked {} primes.", checked_primes.len());
+                        println!("| {0: <14} |", checked_primes.len());
                     }
                     next += 1;
 
@@ -233,7 +246,8 @@ impl PickLock {
     }
 
     if report {
-        println!("Checked {} primes.", checked_primes.len());
+        println!("| {0: <14} |", checked_primes.len());
+        println!("| {0: <14} |", "----FINAL-----");
     }
 
     if &p * &q != self.n { // Final test in case 'next_prime_lookup loop is exhausted without finding p and q.
@@ -371,7 +385,10 @@ kTirAEQ+F3NKfNEdR9J/+Rq+2ViT3wnamtuBG+10SKuKjr9FKhh/T0sCAwEAAQ==
             assert!(false);
             return;
         };
-        pl.alter_max_iter(1_000);
+        let Ok(_) = pl.alter_max_iter(1_000) else {
+            assert!(false);
+            return;
+        };
 
         match pl.try_lock_pick_strong_private(true) {
             Ok(key) => println!("SUCCESS:\n{key}"),
