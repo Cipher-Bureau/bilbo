@@ -10,6 +10,7 @@ num-bigint = "0.4.5"
 num-prime = "0.4.4"
 openssl = "0.10.64"
 pem = "3.0.4"
+ping = "0.5.2"
 rand = "0.8.5"
 
 [dev-dependencies]
