@@ -2,3 +2,4 @@
 
 pub mod rsa;
 pub mod entropy;
+pub mod smuggler;
