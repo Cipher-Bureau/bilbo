@@ -198,6 +198,12 @@ fn run_entropy(path: Option<&PathBuf>, report_level: Option<&u8>) -> Result<Stri
 
     let total_entropy = total_entropy.get_entropy();
     let ratio = if total_bts == 0 { 0 } else {total_entropy / total_bts as u64};
+
+    if report_level == 2 {
+        result.push_str(&format!(
+            "|================================================================|\n",
+        ));
+    }
     result.push_str(&format!("| {0: <6} | {1: <8} | {2: <7} | {3: <5} | {4: <24} |\n", "TOTAL", total_entropy, total_bts, ratio, "         ---"));
 
     Ok(result)
