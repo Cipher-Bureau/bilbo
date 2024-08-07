@@ -12,7 +12,7 @@ const EXPLAIN: &str = "
 
 [ 🔐 ] Bilbo offers two RSA cracking algorithms.
 
-1. Weak 😜: 
+1. Weak 😜:
 Is cracking RSA private key when p and q are not to far apart.
 Crack Weak Private is able to crack secured RSA keys, where p and q are picked to be close numbers,
 Based on https://en.wikipedia.org/wiki/Fermat%27s_factorization_method
@@ -96,7 +96,7 @@ fn main() {
     let matches = cmd.get_matches();
     match matches.subcommand() {
         Some(("picklock", matches)) =>  {
-            match run_picklock(matches.get_one::<PathBuf>("file"), 
+            match run_picklock(matches.get_one::<PathBuf>("file"),
             matches.get_one::<u32>("strong"), matches.get_one::<u8>("report")) {
                 Ok(s) => println!("🗝 Lock picked private PEM key:\n{s}\n"),
                 Err(e) => println!("🤷 Failure: {}", e.to_string()),
@@ -104,26 +104,26 @@ fn main() {
         },
         Some(("entropy", matches)) => {
             match run_entropy(matches.get_one::<PathBuf>("file"), matches.get_one::<u8>("report")) {
-                Ok(s) => println!("📦 Ping Smuggler: \n{s}\n"),
+                Ok(s) => println!("📶 Entropy:\n{s}\n"),
                 Err(e) => println!("🤷 Failure: {}", e.to_string()),
             }
 
         },
         Some(("smuggle", matches)) => match smuggle_file_via_ping(matches.get_one("file"), matches.get_one("ip"), matches.get_one("encrypt")) {
-                Ok(s) => println!("📶 Entropy:\n{s}\n"),
-                Err(e) => println!("🤷 Failure: {}", e.to_string()),
+            Ok(s) => println!("📦 Ping Smuggler: \n{s}\n"),
+            Err(e) => println!("🤷 Failure: {}", e.to_string()),
         }
         Some(("explain", _matches)) => println!("{EXPLAIN}"),
         None => (),
         _ => unreachable!("unreachable code"),
-    };   
+    };
 }
 
 fn run_picklock(path: Option<&PathBuf>, strong_iters: Option<&u32>, report_level: Option<&u8>) -> Result<String> {
     let report_level = check_level(report_level)?;
-    let Some(path) = path else { 
+    let Some(path) = path else {
         return Err(Error::new(
-            ErrorKind::InvalidInput, 
+            ErrorKind::InvalidInput,
             "I received an empty file path... I don't know what to picklock, please be specific..."
         ))
     };
@@ -148,7 +148,7 @@ fn run_picklock(path: Option<&PathBuf>, strong_iters: Option<&u32>, report_level
             pl.try_lock_pick_strong_private(report_level == 2)?
         }
     };
-    let pem_priv = to_pem(d, KeyType::Private)?; 
+    let pem_priv = to_pem(d, KeyType::Private)?;
 
     Ok(pem_priv)
 }
@@ -158,9 +158,9 @@ fn run_entropy(path: Option<&PathBuf>, report_level: Option<&u8>) -> Result<Stri
     if report_level >= 1 {
         println!("🧮 Starting Shannon entropy calculation.\n");
     }
-    let Some(path) = path else { 
+    let Some(path) = path else {
         return Err(Error::new(
-            ErrorKind::InvalidInput, 
+            ErrorKind::InvalidInput,
             "I received an empty file path... I don't know what file to calculate entropy for, please be specific..."
         ))
     };
@@ -172,8 +172,11 @@ fn run_entropy(path: Option<&PathBuf>, report_level: Option<&u8>) -> Result<Stri
     let mut total_bts: usize = 0;
 
     result.push_str(&format!(
-        "| {0: <6} | {1: <7} | {2: <6} | {3: <24} |\n",
-        "Line", "Entropy", "Bytes", "Starts with"
+        "| {0: <6} | {1: <8} | {2: <7} | {3: <5} | {4: <24} |\n",
+        "Line", "Entropy", "Bytes", "Ratio", "Starts with"
+    ));
+    result.push_str(&format!(
+        "|================================================================|\n",
     ));
 
     for (i, line) in data.lines().enumerate() {
@@ -188,12 +191,14 @@ fn run_entropy(path: Option<&PathBuf>, report_level: Option<&u8>) -> Result<Stri
             ent.write(buf)?;
             ent.process();
             let e = ent.get_entropy();
-            result.push_str(&format!("| {0: <6} | {1: <7} | {2: <6} | {3: <21}... |\n", i+1, e, bts, &line[..if line.len() < 21 { line.len() } else { 21 }]));
+            let ratio = if bts == 0 { 0 } else {e / bts as u64};
+            result.push_str(&format!("| {0: <6} | {1: <8} | {2: <7} | {3: <5} | {4: <21}... |\n", i+1, e, bts, ratio, &line[..if line.len() < 21 { line.len() } else { 21 }]));
         }
     }
 
     let total_entropy = total_entropy.get_entropy();
-    result.push_str(&format!("| {0: <6} | {1: <7} | {2: <6} | {3: <24} |\n", "TOTAL", total_entropy, total_bts, "")); 
+    let ratio = if total_bts == 0 { 0 } else {total_entropy / total_bts as u64};
+    result.push_str(&format!("| {0: <6} | {1: <8} | {2: <7} | {3: <5} | {4: <24} |\n", "TOTAL", total_entropy, total_bts, ratio, "         ---"));
 
     Ok(result)
 }
@@ -205,9 +210,9 @@ fn smuggle_file_via_ping(file: Option<&PathBuf>, ip: Option<&Ipv4Addr>, key: Opt
     let Some(ip) = ip else {
         return Err(Error::new(ErrorKind::InvalidInput, "empty or incorrect ip address"));
     };
-    
+
     let data = read_to_string(path)?;
-    
+
     match key {
         None => {
             ping_plain(IpAddr::V4(*ip), &data.as_bytes(), &Config::default())?;
@@ -216,7 +221,7 @@ fn smuggle_file_via_ping(file: Option<&PathBuf>, ip: Option<&Ipv4Addr>, key: Opt
         Some(k) => {
             if k.len() != 16 {
                 return Err(
-                    Error::new(ErrorKind::InvalidInput, 
+                    Error::new(ErrorKind::InvalidInput,
                     format!("incorrect kye size, expected 16 bytes, got {} bytes", k.len())),
                 );
             }

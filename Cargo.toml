@@ -3,12 +3,20 @@ name = "bilbo"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "bilbo"
+path = "src/lib.rs"
+
+[[bin]]
+name = "bilbo"
+path = "src/main.rs"
+
 [dependencies]
 clap = { version = "4.5.7", features = ["cargo"] }
 crossbeam = { version = "0.8.4", features = ["crossbeam-channel"] }
 num-bigint = "0.4.5"
 num-prime = "0.4.4"
-openssl = "0.10.64"
+openssl = { version = "0.10.64", features = ["vendored"] }
 pem = "3.0.4"
 ping = "0.5.2"
 rand = "0.8.5"
