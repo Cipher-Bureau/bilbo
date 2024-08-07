@@ -1,16 +1,24 @@
-use openssl::{bn::{BigNum, BigNumRef}, error, rsa::Rsa};
-use std::{collections::HashSet, io::{Error, ErrorKind, Result}, thread::spawn};
+use crossbeam::channel::{select, unbounded, Receiver, Sender};
 use num_bigint::{BigInt, BigUint, Sign};
-use crossbeam::channel::{Sender, Receiver, unbounded, select};
-use pem::{Pem, encode};
-use std::fmt::{Display, Formatter, Result as FmtResult};
 use num_prime::nt_funcs::is_prime;
+use openssl::{
+    bn::{BigNum, BigNumRef},
+    error,
+    rsa::Rsa,
+};
+use pem::{encode, Pem};
+use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::{
+    collections::HashSet,
+    io::{Error, ErrorKind, Result},
+    thread::spawn,
+};
 
 const MAX_ITERATIONS: usize = 1000;
 const BITS_IN_BYTE: u32 = 8;
 const PRIME_CREATE_PROCESSES: u8 = 4;
 
-/// Describes the Key type. 
+/// Describes the Key type.
 pub enum KeyType {
     Private,
     Public,
@@ -18,18 +26,24 @@ pub enum KeyType {
 
 impl Display for KeyType {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        write!(f, "{}", match &self {
-            KeyType::Private => "PRIVATE KEY",
-            KeyType::Public => "PUBLIC KEY",
-        })
+        write!(
+            f,
+            "{}",
+            match &self {
+                KeyType::Private => "PRIVATE KEY",
+                KeyType::Public => "PUBLIC KEY",
+            }
+        )
     }
 }
-
 
 #[inline(always)]
 fn generate_safe_prime_bit_size(bits: u32) -> Result<BigNum> {
     if bits == 0 {
-        return Err(Error::new(ErrorKind::InvalidInput, format!("size cannot be less then 1 received {bits}")));
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            format!("size cannot be less then 1 received {bits}"),
+        ));
     }
     let mut bn = BigNum::new()?;
     BigNumRef::generate_prime(&mut bn, bits as i32, true, None, None)?;
@@ -37,7 +51,7 @@ fn generate_safe_prime_bit_size(bits: u32) -> Result<BigNum> {
 }
 
 /// A PickLock for a RSA key and run brute force cracking.
-/// 
+///
 pub struct PickLock {
     e: BigInt,
     n: BigInt,
@@ -49,10 +63,12 @@ impl PickLock {
     ///
     #[inline(always)]
     pub fn from_pem(rsa_pem: &str) -> Result<Self> {
-        let public_rsa = Rsa::public_key_from_pem(rsa_pem.as_bytes())
-            .or_else(|e: error::ErrorStack| Err(Error::new(ErrorKind::InvalidData, e.to_string())))?;
-        
-        Ok(Self{
+        let public_rsa =
+            Rsa::public_key_from_pem(rsa_pem.as_bytes()).or_else(|e: error::ErrorStack| {
+                Err(Error::new(ErrorKind::InvalidData, e.to_string()))
+            })?;
+
+        Ok(Self {
             e: BigInt::from_bytes_be(Sign::Plus, &public_rsa.e().to_vec()),
             n: BigInt::from_bytes_be(Sign::Plus, &public_rsa.n().to_vec()),
             max_iter: MAX_ITERATIONS,
@@ -60,10 +76,14 @@ impl PickLock {
     }
 
     /// Straight forward way to creates a new PickLock from publicly known exponent and modulus.
-    /// 
+    ///
     #[inline(always)]
     pub fn from_exponent_and_modulus(e: BigInt, n: BigInt) -> Self {
-        Self{e, n, max_iter: MAX_ITERATIONS}
+        Self {
+            e,
+            n,
+            max_iter: MAX_ITERATIONS,
+        }
     }
 
     /// Alters max iteration that is a safety cap on how many iterations can be performed for a brute force calculation.
@@ -73,25 +93,23 @@ impl PickLock {
     #[inline(always)]
     pub fn alter_max_iter(&mut self, mut iter: usize) -> Result<()> {
         if iter > 99999999999999 {
-            return Err(
-                Error::new(
-                    ErrorKind::InvalidInput, 
-                    format!("Max allowed iter is 99999999999999, got {}", iter),
-                ),
-            );
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                format!("Max allowed iter is 99999999999999, got {}", iter),
+            ));
         }
         if iter == 0 {
             iter = 0;
         }
         self.max_iter = iter;
-        
-        Ok(())
-    } 
 
-    /// Attempts to lock pick the weak private RSA key, 
-    /// by iteratively finding close apart p and q primes used 
+        Ok(())
+    }
+
+    /// Attempts to lock pick the weak private RSA key,
+    /// by iteratively finding close apart p and q primes used
     /// to generate Private Keys based on Public Key.
-    /// If it succeeds then the numeric value is returned, 
+    /// If it succeeds then the numeric value is returned,
     /// and this value may be used to create PEM certificate.
     ///     
     /// RSA PickLock algorithm is cracking RSA private key when p and q are not to far apart.
@@ -107,8 +125,8 @@ impl PickLock {
     /// d - private exponent
     /// e and n are bytes representation of an integer in big endian order.
     /// Returns private key as bytes representation of an integer in big endian order or error otherwise.
-    /// Will not go further then 1000 iterations.
-    /// 
+    /// Will not go further then 1000 iterations if not set differently.
+    ///
     #[inline(always)]
     pub fn try_lock_pick_weak_private(&self) -> Result<BigInt> {
         let mut a = self.n.sqrt() + BigInt::new(Sign::Plus, vec![1]);
@@ -129,43 +147,43 @@ impl PickLock {
         let q = &a - &b;
 
         if &p * &q != self.n {
-            return Err(
-                Error::new(
-                    ErrorKind::Other, 
-                    format!("cannot crack the private exponent of the given n {} and e {}", 
-                        self.n, 
-                        self.e
-                    )
-                )
-            );
+            return Err(Error::new(
+                ErrorKind::Other,
+                format!(
+                    "cannot crack the private exponent of the given n {} and e {}",
+                    self.n, self.e
+                ),
+            ));
         }
 
         let phi = (&p - BigInt::new(Sign::Plus, vec![1])) * (&q - BigInt::new(Sign::Plus, vec![1]));
-        
 
         match self.e.modinv(&phi) {
             Some(r) => Ok(r),
             None => Err(Error::new(
-                ErrorKind::Other, 
-                format!("cannot calculate private exponent for phi {} and e {}", phi, self.e))
-            ),
+                ErrorKind::Other,
+                format!(
+                    "cannot calculate private exponent for phi {} and e {}",
+                    phi, self.e
+                ),
+            )),
         }
     }
 
-    /// Attempts to lock pick the strong private RSA key, 
-    /// by making number of guesses about far apart p and q primes used 
+    /// Attempts to lock pick the strong private RSA key,
+    /// by making number of guesses about far apart p and q primes used
     /// to generate Private Keys based on Public Key.
-    /// If it succeeds then the numeric value is returned, 
+    /// If it succeeds then the numeric value is returned,
     /// and this value may be used to create PEM certificate.
     ///
-    /// NOTE: It is a PROTOTYPE ONLY. 
+    /// NOTE: It is a PROTOTYPE ONLY.
     /// It is not guaranteed to work at all.
-    /// There is just to many primes to check, so even thou 
+    /// There is just to many primes to check, so even thou
     /// it generates a lot of primes, it is still a matter of luck
     /// to find the matching pair.
-    /// 
+    ///
     /// TODO: Make more research and tests to find out how much information can we get to better guess primes.
-    /// 
+    ///
     #[inline(always)]
     pub fn try_lock_pick_strong_private(&self, report: bool) -> Result<BigInt> {
         let p_size = self.n.to_bytes_be().1.len() as u32 / 2;
@@ -173,22 +191,21 @@ impl PickLock {
         let (tx, rx) = unbounded();
         let (stop_tx, stop_rx) = unbounded::<()>();
         for _ in 0..PRIME_CREATE_PROCESSES {
-            for diff in 0..=2 { // Since n = p*q, the size of n will be more or less the sum of the sizes of p and q with +/- 1 bit
+            for diff in 0..=2 {
+                // Since n = p*q, the size of n will be more or less the sum of the sizes of p and q with +/- 1 bit
                 let stop_rx = stop_rx.clone();
                 let tx = tx.clone();
-                stops+=1;
-                spawn(move || {
-                    loop {
-                        select!{
-                            recv(stop_rx) -> _  => {
-                                break;
-                            },
-                            default => {
-                                if let Ok(prime) = generate_safe_prime_bit_size(((p_size * BITS_IN_BYTE) as i32 - diff) as u32) {
-                                    let _ = tx.send(prime);
-                                }
-                            },
-                        }
+                stops += 1;
+                spawn(move || loop {
+                    select! {
+                        recv(stop_rx) -> _  => {
+                            break;
+                        },
+                        default => {
+                            if let Ok(prime) = generate_safe_prime_bit_size(((p_size * BITS_IN_BYTE) as i32 - diff) as u32) {
+                                let _ = tx.send(prime);
+                            }
+                        },
                     }
                 });
             }
@@ -198,8 +215,13 @@ impl PickLock {
     }
 
     #[inline(always)]
-    fn validate_received_prime_pairs(&self, rx: Receiver<BigNum>, stop_tx: Sender<()>, stops: u32, report: bool) -> Result<BigInt> {
-        
+    fn validate_received_prime_pairs(
+        &self,
+        rx: Receiver<BigNum>,
+        stop_tx: Sender<()>,
+        stops: u32,
+        report: bool,
+    ) -> Result<BigInt> {
         let mut p = BigInt::new(Sign::Plus, vec![0]);
         let mut q = BigInt::new(Sign::Plus, vec![0]);
         let mut next = 0;
@@ -207,87 +229,95 @@ impl PickLock {
         if report {
             println!("[ {0: <14} ]", "CHECKED PRIMES");
         }
-        
+
         'checker: loop {
             select! {
-                recv(rx) -> prime => {
-                    let Ok(prime) = prime else {continue 'checker};
-                    if next == self.max_iter {
-                        break 'checker;
-                    }
-                    if report && next % 25 == 0 && next != 0 {
-                        println!("| {0: <14} |", checked_primes.len());
-                    }
-                    next += 1;
+                    recv(rx) -> prime => {
+                        let Ok(prime) = prime else {continue 'checker};
+                        if next == self.max_iter {
+                            break 'checker;
+                        }
+                        if report && next % 25 == 0 && next != 0 {
+                            println!("| {0: <14} |", checked_primes.len());
+                        }
+                        next += 1;
 
-                    p = BigInt::from_bytes_be(Sign::Plus, &prime.to_vec());
+                        p = BigInt::from_bytes_be(Sign::Plus, &prime.to_vec());
 
-                    if !checked_primes.insert(p.clone()) {
-                        continue 'checker;
-                    }
+                        if !checked_primes.insert(p.clone()) {
+                            continue 'checker;
+                        }
 
-                    q = &self.n / &p;
- 
-                    if &p * &q != self.n {
-                        continue 'checker;
-                    }
-                    let Some(q_uint) = q.to_biguint() else {
-                        return Err(Error::new(ErrorKind::InvalidData, "cannot transform BigInt to BigUint"));
-                    };
-                    if is_prime::<BigUint>(&q_uint, None).probably() {
-                        break 'checker;
-                    }
-                },
+                        q = &self.n / &p;
+
+                        if &p * &q != self.n {
+                            continue 'checker;
+                        }
+                        let Some(q_uint) = q.to_biguint() else {
+                            return Err(Error::new(ErrorKind::InvalidData, "cannot transform BigInt to BigUint"));
+                        };
+                        if is_prime::<BigUint>(&q_uint, None).probably() {
+                            break 'checker;
+                        }
+                    },
+            }
+        }
+
+        for _ in 0..stops {
+            let _ = stop_tx.send(());
+        }
+
+        if report {
+            println!("| {0: <14} |", checked_primes.len());
+            println!("| {0: <14} |", "----FINAL-----");
+        }
+
+        if &p * &q != self.n {
+            // Final test in case 'next_prime_lookup loop is exhausted without finding p and q.
+            return Err(Error::new(
+                ErrorKind::Other,
+                format!(
+                    "cannot crack the private exponent of the given n {} and e {}",
+                    self.n, self.e
+                ),
+            ));
+        }
+
+        let phi = (&p - BigInt::new(Sign::Plus, vec![1])) * (&q - BigInt::new(Sign::Plus, vec![1]));
+
+        match self.e.modinv(&phi) {
+            Some(r) => Ok(r),
+            None => Err(Error::new(
+                ErrorKind::Other,
+                format!(
+                    "cannot calculate private exponent for phi {} and e {}",
+                    phi, self.e
+                ),
+            )),
         }
     }
-
-    for _ in 0..stops {
-        let _ = stop_tx.send(());
-    }
-
-    if report {
-        println!("| {0: <14} |", checked_primes.len());
-        println!("| {0: <14} |", "----FINAL-----");
-    }
-
-    if &p * &q != self.n { // Final test in case 'next_prime_lookup loop is exhausted without finding p and q.
-        return Err(
-            Error::new(
-                ErrorKind::Other, 
-                format!("cannot crack the private exponent of the given n {} and e {}", 
-                    self.n, 
-                    self.e
-                )
-            )
-        );
-    }
-
-    let phi = (&p - BigInt::new(Sign::Plus, vec![1])) * (&q - BigInt::new(Sign::Plus, vec![1]));
-
-
-    match self.e.modinv(&phi) {
-        Some(r) => Ok(r),
-        None => Err(Error::new(
-            ErrorKind::Other, 
-            format!("cannot calculate private exponent for phi {} and e {}", phi, self.e))
-        ),  
-    }
-    }
-} 
+}
 
 impl Display for PickLock {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        write!(f, "e: {} [ bytes {} ], n: {} [ bytes {} ], iter: {},", self.e, self.e.to_bytes_be().1.len(), self.n, self.n.to_bytes_be().1.len(), self.max_iter)
+        write!(
+            f,
+            "e: {} [ bytes {} ], n: {} [ bytes {} ], iter: {},",
+            self.e,
+            self.e.to_bytes_be().1.len(),
+            self.n,
+            self.n.to_bytes_be().1.len(),
+            self.max_iter
+        )
     }
 }
 
 /// Attempts to convert BigInt into a String in Pem format.
-/// 
+///
 #[inline(always)]
 pub fn to_pem(d: BigInt, kt: KeyType) -> Result<String> {
     Ok(encode(&Pem::new(kt, d.to_bytes_be().1)))
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -330,7 +360,6 @@ kTirAEQ+F3NKfNEdR9J/+Rq+2ViT3wnamtuBG+10SKuKjr9FKhh/T0sCAwEAAQ==
         };
 
         assert!(true);
-
     }
 
     #[test]
@@ -350,15 +379,15 @@ kTirAEQ+F3NKfNEdR9J/+Rq+2ViT3wnamtuBG+10SKuKjr9FKhh/T0sCAwEAAQ==
         };
 
         let test_cases: Vec<TestCase> = vec![
-            TestCase{
-                n: BigInt::new(Sign::Plus, vec![63648259]), 
-                e: BigInt::new(Sign::Plus, vec![65537]), 
-                d: BigInt::new(Sign::Plus, vec![27903761])
+            TestCase {
+                n: BigInt::new(Sign::Plus, vec![63648259]),
+                e: BigInt::new(Sign::Plus, vec![65537]),
+                d: BigInt::new(Sign::Plus, vec![27903761]),
             },
-            TestCase{
-                n: BigInt::from_bytes_be(Sign::Plus, &large_n.to_vec()), 
-                e: BigInt::new(Sign::Plus, vec![65537]), 
-                d: BigInt::from_bytes_be(Sign::Plus, &large_d.to_vec()), 
+            TestCase {
+                n: BigInt::from_bytes_be(Sign::Plus, &large_n.to_vec()),
+                e: BigInt::new(Sign::Plus, vec![65537]),
+                d: BigInt::from_bytes_be(Sign::Plus, &large_d.to_vec()),
             },
         ];
 
@@ -372,7 +401,7 @@ kTirAEQ+F3NKfNEdR9J/+Rq+2ViT3wnamtuBG+10SKuKjr9FKhh/T0sCAwEAAQ==
             println!("\n{:?}", to_pem(res, KeyType::Private).unwrap_or_default());
         }
     }
-    
+
     #[test]
     fn it_should_try_to_crack_with_pick_lock_strong_private_the_secure_rsa() {
         const PUBLIC_KEY_SAMPLE: &'static str = "-----BEGIN PUBLIC KEY-----
@@ -394,7 +423,5 @@ kTirAEQ+F3NKfNEdR9J/+Rq+2ViT3wnamtuBG+10SKuKjr9FKhh/T0sCAwEAAQ==
             Ok(key) => println!("SUCCESS:\n{key}"),
             Err(e) => println!("FAILURE:\n{e}"),
         }
-
-
     }
 }

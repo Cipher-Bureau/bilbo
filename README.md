@@ -17,11 +17,45 @@ A small, handcrafted tool for security researchers.
  ## Ping Smuggler
 
  - Smuggles the file via ping protocol to given ip address in plain text.
- - Smuggles the file via ping protocol to given ip address encrypted by 16 bytes AES key. 
+ - Smuggles the file via ping protocol to given ip address encrypted by 16 bytes AES key.
 
- ## Development 
+ ## Development
 
-1. Make sure test are passing and write tests for new functionalities.
+ ### Install external dependencies
+
+Bilbo uses Openssl lib in version 3. Cargo.toml `openssl = { version = "0.10.64", features = ["vendored"] }` will signal openssl-sys to link openssl statically.
+
+To install openssl version 3.x:
+
+
+ ```sh
+ # macOS (Homebrew)
+ $ brew install openssl@3
+
+ # macOS (MacPorts)
+ $ sudo port install openssl
+
+ # macOS (pkgsrc)
+ $ sudo pkgin install openssl
+
+ # Arch Linux
+ $ sudo pacman -S pkgconf openssl
+
+ # Debian and Ubuntu
+ $ sudo apt-get install pkg-config libssl-dev
+
+ # Fedora
+ $ sudo dnf install pkgconf perl-FindBin perl-IPC-Cmd openssl-devel
+
+ # Alpine Linux
+ $ apk add pkgconf openssl-dev
+
+ # openSUSE
+ $ sudo zypper in libopenssl-devel
+ ```
+
+
+### Make sure test are passing and write tests for new functionalities.
 
 To run test:
 
@@ -29,7 +63,7 @@ To run test:
 cargo run test --profile test
 ```
 
-2. Make sure your change or update isn't making performance worst.
+### Make sure your change or update isn't making performance worst.
 
 To run benchmarks:
 
