@@ -1,5 +1,6 @@
+use crate::errors::BilboError;
 use std::collections::HashMap;
-use std::io::{Error, ErrorKind, Write};
+use std::io::Write;
 use std::str::from_utf8;
 
 const CHUNK_SIZE: usize = 128;
@@ -12,6 +13,7 @@ const CHUNK_SIZE: usize = 128;
 /// Given a discrete random variable 𝑋 which takes values in the set 𝑋 and is distributed according to
 /// p: X -> [0, 1], the entropy is H(X) := - Sum(p(x)log p()x).
 ///
+#[derive(Debug, Default)]
 pub struct Shannon {
     buf: Vec<u8>,
     entropy: u64,
@@ -21,11 +23,15 @@ pub struct Shannon {
 impl Shannon {
     #[inline(always)]
     pub fn new() -> Self {
-        Self{buf: Vec::with_capacity(CHUNK_SIZE), entropy: 0, freq: HashMap::with_capacity(CHUNK_SIZE)}
+        Self {
+            buf: Vec::with_capacity(CHUNK_SIZE),
+            entropy: 0,
+            freq: HashMap::with_capacity(CHUNK_SIZE),
+        }
     }
 
     #[inline(always)]
-    pub fn process(& mut self) {
+    pub fn process(&mut self) {
         self.entropy = self.shannon();
     }
 
@@ -35,10 +41,8 @@ impl Shannon {
     }
 
     #[inline(always)]
-    pub fn get_token_str(&self) -> Result<&str, Error> {
-        let s = from_utf8(&self.buf)
-            .or_else(|e| Err(Error::new(ErrorKind::Other, e.to_string())))?;
-        Ok(s)
+    pub fn get_token_str(&self) -> Result<&str, BilboError> {
+        Ok(from_utf8(&self.buf)?)
     }
 
     #[inline(always)]
@@ -48,13 +52,16 @@ impl Shannon {
 
     #[inline(always)]
     pub fn get_occurrence(&self, byte: &u8) -> u64 {
-        *self.freq.get(byte).unwrap_or_else(|| &0_f64) as u64
+        *self.freq.get(byte).unwrap_or(&0_f64) as u64
     }
 
     #[inline(always)]
     fn shannon(&mut self) -> u64 {
         for b in self.buf.iter() {
-            self.freq.entry(*b).and_modify(|v| *v += 1_f64).or_insert(1_f64);
+            self.freq
+                .entry(*b)
+                .and_modify(|v| *v += 1_f64)
+                .or_insert(1_f64);
         }
         let div: f64 = self.buf.len() as f64;
         let sum = self.freq.iter().fold(0_f64, |mut acc, (_, v)| {
@@ -68,6 +75,11 @@ impl Shannon {
 
 impl Write for Shannon {
     #[inline(always)]
+    fn write_all(&mut self, buf: &[u8]) -> Result<(), std::io::Error> {
+        self.buf.extend_from_slice(buf);
+        Ok(())
+    }
+
     fn write(&mut self, buf: &[u8]) -> Result<usize, std::io::Error> {
         self.buf.extend_from_slice(buf);
         Ok(buf.len())
@@ -82,8 +94,6 @@ impl Write for Shannon {
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use std::{io::Write, iter::zip};
@@ -92,8 +102,13 @@ mod tests {
 
     #[test]
     fn it_should_calculate_shannon_entropy_of_given_information_buffers() {
-        let given: [&str; 17] = ["123", "password", "myCa7I5a60d", "m#P52s@ap$V",
-            "IthinkItIsVeryStrong", "7k289be923hv934",
+        let given: [&str; 17] = [
+            "123",
+            "password",
+            "myCa7I5a60d",
+            "m#P52s@ap$V",
+            "IthinkItIsVeryStrong",
+            "7k289be923hv934",
             "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsjtGIk8SxD+OEiBpP2/T",
             "JUAF0upwuKGMk6wH8Rwov88VvzJrVm2NCticTk5FUg+UG5r8JArrV4tJPRHQyvqK",
             "wF4NiksuvOjv3HyIf4oaOhZjT8hDne1Bfv+cFqZJ61Gk0MjANh/T5q9vxER/7TdU",
@@ -105,8 +120,10 @@ mod tests {
             "FlOId1p1K6GBhQOBggAEVWiPAqU0fQG8y+uQZPTo62vcw5bmbkuTeHJg4YRdOyYK",
             "9T9MYS/6PpWd8yzRdzLtIhyBfYhcMy814OzZjddsD5v2Npsms+3Ewr+8GY8o88ED",
             "d/xfnUnA1VpdI1n1DCAOow9BFXFxWrSHh3LvRg3h1twLSIbBwvsXr8o1zoQuMuY=",
-            ];
-        let expected: [u64; 17] = [6, 24, 44, 44, 80, 60, 320, 384, 384, 384, 384, 384, 320, 384, 384, 384, 384];
+        ];
+        let expected: [u64; 17] = [
+            6, 24, 44, 44, 80, 60, 320, 384, 384, 384, 384, 384, 320, 384, 384, 384, 384,
+        ];
 
         for (g, e) in zip(given, expected) {
             let mut pre = Shannon::new();
@@ -124,7 +141,7 @@ mod tests {
             "aaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "1231234534575695wadasdfasfs",
             "qwertyuiuoppooiqwurqeiopqww",
-            "a=========================a"
+            "a=========================a",
         ];
         let expected: [u64; 6] = [3, 1, 27, 3, 0, 2];
 

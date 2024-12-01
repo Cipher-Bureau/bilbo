@@ -3,16 +3,13 @@ use num_bigint::{BigInt, BigUint, Sign};
 use num_prime::nt_funcs::is_prime;
 use openssl::{
     bn::{BigNum, BigNumRef},
-    error,
     rsa::Rsa,
 };
 use pem::{encode, Pem};
 use std::fmt::{Display, Formatter, Result as FmtResult};
-use std::{
-    collections::HashSet,
-    io::{Error, ErrorKind, Result},
-    thread::spawn,
-};
+use std::{collections::HashSet, thread::spawn};
+
+use crate::errors::BilboError;
 
 const MAX_ITERATIONS: usize = 1000;
 const BITS_IN_BYTE: u32 = 8;
@@ -25,6 +22,7 @@ pub enum KeyType {
 }
 
 impl Display for KeyType {
+    #[inline(always)]
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         write!(
             f,
@@ -38,12 +36,11 @@ impl Display for KeyType {
 }
 
 #[inline(always)]
-fn generate_safe_prime_bit_size(bits: u32) -> Result<BigNum> {
+fn generate_safe_prime_bit_size(bits: u32) -> Result<BigNum, BilboError> {
     if bits == 0 {
-        return Err(Error::new(
-            ErrorKind::InvalidInput,
-            format!("size cannot be less then 1 received {bits}"),
-        ));
+        return Err(BilboError::GenericError(format!(
+            "size cannot be less then 1 received {bits}"
+        )));
     }
     let mut bn = BigNum::new()?;
     BigNumRef::generate_prime(&mut bn, bits as i32, true, None, None)?;
@@ -62,11 +59,8 @@ impl PickLock {
     /// Creates a new PickLock as and imprint of public RSA key to perform RSA key cracking.
     ///
     #[inline(always)]
-    pub fn from_pem(rsa_pem: &str) -> Result<Self> {
-        let public_rsa =
-            Rsa::public_key_from_pem(rsa_pem.as_bytes()).or_else(|e: error::ErrorStack| {
-                Err(Error::new(ErrorKind::InvalidData, e.to_string()))
-            })?;
+    pub fn from_pem(rsa_pem: &str) -> Result<Self, BilboError> {
+        let public_rsa = Rsa::public_key_from_pem(rsa_pem.as_bytes())?;
 
         Ok(Self {
             e: BigInt::from_bytes_be(Sign::Plus, &public_rsa.e().to_vec()),
@@ -91,12 +85,12 @@ impl PickLock {
     /// Default number of iterations is set to 1000, which is way above expected possibility to crack the key.
     ///   
     #[inline(always)]
-    pub fn alter_max_iter(&mut self, mut iter: usize) -> Result<()> {
+    pub fn alter_max_iter(&mut self, mut iter: usize) -> Result<(), BilboError> {
         if iter > 99999999999999 {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                format!("Max allowed iter is 99999999999999, got {}", iter),
-            ));
+            return Err(BilboError::GenericError(format!(
+                "Max allowed iter is 99999999999999, got {}",
+                iter
+            )));
         }
         if iter == 0 {
             iter = 0;
@@ -128,7 +122,7 @@ impl PickLock {
     /// Will not go further then 1000 iterations if not set differently.
     ///
     #[inline(always)]
-    pub fn try_lock_pick_weak_private(&self) -> Result<BigInt> {
+    pub fn try_lock_pick_weak_private(&self) -> Result<BigInt, BilboError> {
         let mut a = self.n.sqrt() + BigInt::new(Sign::Plus, vec![1]);
         let mut b = BigInt::new(Sign::Plus, vec![0]);
 
@@ -147,26 +141,20 @@ impl PickLock {
         let q = &a - &b;
 
         if &p * &q != self.n {
-            return Err(Error::new(
-                ErrorKind::Other,
-                format!(
-                    "cannot crack the private exponent of the given n {} and e {}",
-                    self.n, self.e
-                ),
-            ));
+            return Err(BilboError::GenericError(format!(
+                "cannot crack the private exponent of the given n {} and e {}",
+                self.n, self.e
+            )));
         }
 
         let phi = (&p - BigInt::new(Sign::Plus, vec![1])) * (&q - BigInt::new(Sign::Plus, vec![1]));
 
         match self.e.modinv(&phi) {
             Some(r) => Ok(r),
-            None => Err(Error::new(
-                ErrorKind::Other,
-                format!(
-                    "cannot calculate private exponent for phi {} and e {}",
-                    phi, self.e
-                ),
-            )),
+            None => Err(BilboError::GenericError(format!(
+                "cannot calculate private exponent for phi {} and e {}",
+                phi, self.e
+            ))),
         }
     }
 
@@ -185,7 +173,7 @@ impl PickLock {
     /// TODO: Make more research and tests to find out how much information can we get to better guess primes.
     ///
     #[inline(always)]
-    pub fn try_lock_pick_strong_private(&self, report: bool) -> Result<BigInt> {
+    pub fn try_lock_pick_strong_private(&self, report: bool) -> Result<BigInt, BilboError> {
         let p_size = self.n.to_bytes_be().1.len() as u32 / 2;
         let mut stops = 0;
         let (tx, rx) = unbounded();
@@ -221,7 +209,7 @@ impl PickLock {
         stop_tx: Sender<()>,
         stops: u32,
         report: bool,
-    ) -> Result<BigInt> {
+    ) -> Result<BigInt, BilboError> {
         let mut p = BigInt::new(Sign::Plus, vec![0]);
         let mut q = BigInt::new(Sign::Plus, vec![0]);
         let mut next = 0;
@@ -254,7 +242,7 @@ impl PickLock {
                             continue 'checker;
                         }
                         let Some(q_uint) = q.to_biguint() else {
-                            return Err(Error::new(ErrorKind::InvalidData, "cannot transform BigInt to BigUint"));
+                            return Err(BilboError::GenericError("cannot transform BigInt to BigUint".to_string()));
                         };
                         if is_prime::<BigUint>(&q_uint, None).probably() {
                             break 'checker;
@@ -274,31 +262,26 @@ impl PickLock {
 
         if &p * &q != self.n {
             // Final test in case 'next_prime_lookup loop is exhausted without finding p and q.
-            return Err(Error::new(
-                ErrorKind::Other,
-                format!(
-                    "cannot crack the private exponent of the given n {} and e {}",
-                    self.n, self.e
-                ),
-            ));
+            return Err(BilboError::GenericError(format!(
+                "cannot crack the private exponent of the given n {} and e {}",
+                self.n, self.e
+            )));
         }
 
         let phi = (&p - BigInt::new(Sign::Plus, vec![1])) * (&q - BigInt::new(Sign::Plus, vec![1]));
 
         match self.e.modinv(&phi) {
             Some(r) => Ok(r),
-            None => Err(Error::new(
-                ErrorKind::Other,
-                format!(
-                    "cannot calculate private exponent for phi {} and e {}",
-                    phi, self.e
-                ),
-            )),
+            None => Err(BilboError::GenericError(format!(
+                "cannot calculate private exponent for phi {} and e {}",
+                phi, self.e
+            ))),
         }
     }
 }
 
 impl Display for PickLock {
+    #[inline(always)]
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         write!(
             f,
@@ -315,7 +298,7 @@ impl Display for PickLock {
 /// Attempts to convert BigInt into a String in Pem format.
 ///
 #[inline(always)]
-pub fn to_pem(d: BigInt, kt: KeyType) -> Result<String> {
+pub fn to_pem(d: BigInt, kt: KeyType) -> Result<String, BilboError> {
     Ok(encode(&Pem::new(kt, d.to_bytes_be().1)))
 }
 
@@ -325,58 +308,48 @@ mod tests {
     use openssl::bn::BigNum;
 
     #[test]
-    fn it_should_generate_prime_number_and_validate_it_with_success() {
+    fn it_should_generate_prime_number_and_validate_it_with_success() -> Result<(), BilboError> {
         for bytes in (8..=64).step_by(8) {
-            let Ok(p1) = generate_safe_prime_bit_size(bytes * BITS_IN_BYTE) else {
-                assert!(false);
-                return;
-            };
+            let p1 = generate_safe_prime_bit_size(bytes * BITS_IN_BYTE)?;
             let p1 = BigInt::from_bytes_be(Sign::Plus, &p1.to_vec());
             let Some(p1) = p1.to_biguint() else {
-                assert!(false);
-                return;
+                panic!();
             };
             assert!(is_prime::<BigUint>(&p1, None).probably());
         }
+
+        Ok(())
     }
 
     #[test]
-    fn it_should_not_crack_with_pick_lock_weak_private_the_secure_rsa() {
-        const PUBLIC_KEY_SAMPLE: &'static str = "-----BEGIN PUBLIC KEY-----
+    fn it_should_not_crack_with_pick_lock_weak_private_the_secure_rsa() -> Result<(), BilboError> {
+        const PUBLIC_KEY_SAMPLE: &str = "-----BEGIN PUBLIC KEY-----
 MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAMp2Z+WFY2ygdgPMnWpJNxqtuweA1nix
 kTirAEQ+F3NKfNEdR9J/+Rq+2ViT3wnamtuBG+10SKuKjr9FKhh/T0sCAwEAAQ==
 -----END PUBLIC KEY-----
 ";
 
-        let Ok(pl) = PickLock::from_pem(&PUBLIC_KEY_SAMPLE) else {
-            assert!(false);
-            return;
-        };
+        let pl = PickLock::from_pem(PUBLIC_KEY_SAMPLE)?;
+
         println!("PickLock: {pl}");
 
         let Err(_e) = pl.try_lock_pick_weak_private() else {
-            assert!(false);
-            return;
+            panic!();
         };
 
-        assert!(true);
+        Ok(())
     }
 
     #[test]
-    pub fn it_should_crack_with_pick_lock_weak_private_the_unsecure_rsa() {
+    pub fn it_should_crack_with_pick_lock_weak_private_the_unsecure_rsa() -> Result<(), BilboError>
+    {
         struct TestCase {
             n: BigInt,
             e: BigInt,
             d: BigInt,
         }
-        let Ok(large_n) = BigNum::from_dec_str("24051723933323373230335109652699872887260372863633030520380856590934224554506308944154529656903683098544282868895265857723676740447085769973038138116162852753658181861191950778361549639563565516085451073539560657386103501608592321148669427604194877552133864887585897064910317370632491325912646759075452895764136071794899761625652745642888012193592843601786282707419064157922868466879644136792854722277212465067471658496818060980989808791352963906077940588038623347540668963885547785982543883250789113853569537794783330309654648546163063571756203834919697878945651911998161025323667873893944714006021586935213636888431") else {
-            assert!(false);
-            return;
-        };
-        let Ok(large_d) = BigNum::from_dec_str("20859605057389981400415296665239606253551311979432043299936333792698939369418558891569637169366135826146428643134992692481438916188899523620207130817470747633629513081286743218201811495234043370443885950972963184234382668232155560092302387896834347699555010854105235260577040893379009940545782216749159515118484219566373157731404293321389017417036945992984437162056145246504943473128453889715274064071687926343900718250671226003207988553491071490774949729393790264296526140962891140650428560103645538027632465103573248308915991466476312603275778085679414182339076676621372222055380237829179961993191380693342799887257") else {
-            assert!(false);
-            return;
-        };
+        let large_n = BigNum::from_dec_str("24051723933323373230335109652699872887260372863633030520380856590934224554506308944154529656903683098544282868895265857723676740447085769973038138116162852753658181861191950778361549639563565516085451073539560657386103501608592321148669427604194877552133864887585897064910317370632491325912646759075452895764136071794899761625652745642888012193592843601786282707419064157922868466879644136792854722277212465067471658496818060980989808791352963906077940588038623347540668963885547785982543883250789113853569537794783330309654648546163063571756203834919697878945651911998161025323667873893944714006021586935213636888431")?;
+        let large_d = BigNum::from_dec_str("20859605057389981400415296665239606253551311979432043299936333792698939369418558891569637169366135826146428643134992692481438916188899523620207130817470747633629513081286743218201811495234043370443885950972963184234382668232155560092302387896834347699555010854105235260577040893379009940545782216749159515118484219566373157731404293321389017417036945992984437162056145246504943473128453889715274064071687926343900718250671226003207988553491071490774949729393790264296526140962891140650428560103645538027632465103573248308915991466476312603275778085679414182339076676621372222055380237829179961993191380693342799887257")?;
 
         let test_cases: Vec<TestCase> = vec![
             TestCase {
@@ -393,35 +366,31 @@ kTirAEQ+F3NKfNEdR9J/+Rq+2ViT3wnamtuBG+10SKuKjr9FKhh/T0sCAwEAAQ==
 
         for tc in test_cases.iter() {
             let pl = PickLock::from_exponent_and_modulus(tc.e.clone(), tc.n.clone());
-            let Ok(res) = pl.try_lock_pick_weak_private() else {
-                assert!(false);
-                return;
-            };
+            let res = pl.try_lock_pick_weak_private()?;
             assert_eq!(res, tc.d);
             println!("\n{:?}", to_pem(res, KeyType::Private).unwrap_or_default());
         }
+
+        Ok(())
     }
 
     #[test]
-    fn it_should_try_to_crack_with_pick_lock_strong_private_the_secure_rsa() {
-        const PUBLIC_KEY_SAMPLE: &'static str = "-----BEGIN PUBLIC KEY-----
+    fn it_should_try_to_crack_with_pick_lock_strong_private_the_secure_rsa(
+    ) -> Result<(), BilboError> {
+        const PUBLIC_KEY_SAMPLE: &str = "-----BEGIN PUBLIC KEY-----
 MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAMp2Z+WFY2ygdgPMnWpJNxqtuweA1nix
 kTirAEQ+F3NKfNEdR9J/+Rq+2ViT3wnamtuBG+10SKuKjr9FKhh/T0sCAwEAAQ==
 -----END PUBLIC KEY-----
 ";
 
-        let Ok(mut pl) = PickLock::from_pem(&PUBLIC_KEY_SAMPLE) else {
-            assert!(false);
-            return;
-        };
-        let Ok(_) = pl.alter_max_iter(1_000) else {
-            assert!(false);
-            return;
-        };
+        let mut pl = PickLock::from_pem(PUBLIC_KEY_SAMPLE)?;
+        pl.alter_max_iter(1_000)?;
 
         match pl.try_lock_pick_strong_private(true) {
             Ok(key) => println!("SUCCESS:\n{key}"),
             Err(e) => println!("FAILURE:\n{e}"),
         }
+
+        Ok(())
     }
 }
