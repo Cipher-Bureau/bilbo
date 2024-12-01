@@ -9,15 +9,22 @@ A small, handcrafted tool for security researchers.
  - It attempts to brake the key in 1000 iterations, end if key isn't broken at this point it fails with error.
  - It is possible to increase iterations, but it is very unlikely to brake correctly generated RSA key.
 
- ## Entropy
+## Entropy
 
  - Shannon entropy is calculated for a slice of bytes that are written in to the `struct` collecting the measurement.
  - Shannon entropy is a measurement of uncertainty or how much information is encoded in the message.
 
- ## Ping Smuggler
+## Ping Smuggler
 
  - Smuggles the file via ping protocol to given ip address in plain text.
  - Smuggles the file via ping protocol to given ip address encrypted by 16 bytes AES key.
+
+## Shamirs secret sharing.
+
+[Shamir Secret Sharing Algorithm explained](https://en.wikipedia.org/wiki/Shamir%27s_secret_sharing)
+
+ - Creates the shares for given secret.
+ - Reconstructs secret from given shares if enough shares is provided. 
 
  ## Development
 
@@ -139,4 +146,18 @@ Options:
   -h, --help           Print help
   -V, --version        Print version
 
+SHAMIRS:
+Shamirs create shares from secret or collects shares to secret.
+
+Usage: bilbo shamirs [OPTIONS]
+
+Options:
+      --file <FILE>        Path to file with secret or shares.
+      --secret             Tries to reconstruct secrets from file with secret shares.
+      --shares             Tries to crate a shares from file with secret.
+      --minimum <usize>    Minimum number of shares to reconstruct given secret, it shall be less or equal to total. Default 10
+      --total <usize>      Total number of shares to crate for given secret. Default 20
+      --encoding <String>  File encoding 'hex' or 'base64'. Default 'base64'
+  -h, --help               Print help
+  -V, --version            Print version
 ```
